@@ -1,5 +1,5 @@
 import pandas as pd
-from sentence_transformers import SentenceTransformer, InputExample, losses
+from sentence_transformers import SentenceTransformer, InputExample, losses, evaluation
 from torch.utils.data import DataLoader
 import matplotlib.pyplot as plt
 import torch
@@ -24,11 +24,12 @@ train_dataloader = DataLoader(train_examples, shuffle=True, batch_size=256)
 train_loss = losses.MultipleNegativesRankingLoss(model=model)
 
 # Train and save the model
-model.fit(train_objectives=[(train_dataloader, train_loss)], epochs=10)
-model.save('fine_tuned_model')
+model.fit(train_objectives=[(train_dataloader, train_loss)], epochs=50)
+model.save('50_epochs')
 
 # Read the Model and use this on test data!
-model = SentenceTransformer('fine_tuned_model')
+model = SentenceTransformer('50_epochs')
+# model = SentenceTransformer('sentence-transformers/all-MiniLM-L6-v2')
 
 # Encode each example from test data. 
 # The expectation is that, these embeddings should be similar to the ONET_EMBEDDINGS we
@@ -64,15 +65,32 @@ for query_embedding in test_embeddings:
     test_predictions.append(top_categories)
 
 # Optional: Saving predicted data as a new column
-df = pd.DataFrame()
-df['ID'] = test_data['ID']
-df['ONET_NAME'] = test_data['ONET_NAME']
-df['PREDICTIONS'] = test_predictions
+test_df = pd.DataFrame()
+test_df['ID'] = test_data['ID']
+test_df['ONET_NAME'] = test_data['ONET_NAME']
+test_df['PREDICTIONS'] = test_predictions
 # df['PREDICTIONS'] = df['PREDICTIONS'].apply(ast.literal_eval)
-df.to_csv('predictions.csv')
+test_df.to_csv('test_data_predictions.csv')
+
+# Optional: Compute train accuracy - Not a strong signal, can be used as a proxy metric instead of loss curves!
+train_embeddings = model.encode(train_data['BODY'].tolist())
+train_predictions = []
+for query_embedding in train_embeddings:
+    top_categories = faiss_search(query_embedding, top_k=10)
+    train_predictions.append(top_categories)
+
+train_df = pd.DataFrame()
+train_df['ID'] = train_data['ID']
+train_df['ONET_NAME'] = train_data['ONET_NAME']
+train_df['PREDICTIONS'] = train_predictions
+# df['PREDICTIONS'] = df['PREDICTIONS'].apply(ast.literal_eval)
+train_df.to_csv('train_data_predictions.csv')
+correct_predictions = train_df.apply(lambda row: row['ONET_NAME'] in row['PREDICTIONS'], axis=1)
+accuracy = correct_predictions.mean()
+print(f'Final Train Accuracy: {accuracy * 100:.2f}%')
 
 # Computing accuracy, if the actual ONET_NAME is there in predicted list, then it's appropriate
 # Can do Acc@1, Acc@10 metrics (top-1, top-10), but currently this is a simpler version of accuracy computation! 
-correct_predictions = df.apply(lambda row: row['ONET_NAME'] in row['PREDICTIONS'], axis=1)
+correct_predictions = test_df.apply(lambda row: row['ONET_NAME'] in row['PREDICTIONS'], axis=1)
 accuracy = correct_predictions.mean()
-print(f'Final Accuracy: {accuracy * 100:.2f}%')
+print(f'Final Test Accuracy: {accuracy * 100:.2f}%')
